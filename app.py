@@ -21,28 +21,26 @@ pexels_key = st.secrets.get("PEXELS_API_KEY", "")
 st.title("📱 Gerador Multi-Formato de Conteúdo")
 
 # Status simples das APIs no topo
-col_st1, col_st2 = st.columns(2)
-with col_st1:
-    if gemini_key:
-        st.success("⚡ Gemini 3.6 Flash API: Conectado", icon="✅")
-    else:
-        st.error("❌ GEMINI_API_KEY ausente nos Secrets")
-with col_st2:
-    if pexels_key:
-        st.success("⚡ Pexels API (Fotos Reais & Vídeos): Conectado", icon="✅")
-    else:
-        st.warning("⚠️ PEXELS_API_KEY ausente (Usando IA para imagens)")
+#col_st1, col_st2 = st.columns(2)
+#with col_st1:
+#    if gemini_key:
+#        st.success("⚡ Gemini 3.6 Flash API: Conectado", icon="✅")
+#    else:
+#        st.error("❌ GEMINI_API_KEY ausente nos Secrets")
+#with col_st2:
+#    if pexels_key:
+#        st.success("⚡ Pexels API (Fotos Reais & Vídeos): Conectado", icon="✅")
+#    else:
+#        st.warning("⚠️ PEXELS_API_KEY ausente (Usando IA para imagens)")
 
 st.divider()
-
-# --- SELEÇÃO DE FORMATO ---
+ 
 tipo_formato = st.radio(
     "Escolha o formato do conteúdo:",
     ["Post Fixo", "Carrossel", "Vídeo (Reels/TikTok)"],
     horizontal=True,
 )
 
-# --- FORMULÁRIO COM CAMPOS DINÂMICOS ---
 with st.form("form_conteudo"):
 
     if tipo_formato == "Post Fixo":
@@ -97,9 +95,6 @@ with st.form("form_conteudo"):
 
     btn_gerar = st.form_submit_button("🚀 Gerar Conteúdo Completo")
 
-
-# --- FUNÇÕES AUXILIARES & SANITIZAÇÃO FOTOGRÁFICA ---
-
 def sanitizar_prompt(texto):
     if not texto:
         return "fitness athletic"
@@ -121,10 +116,8 @@ MAPA_TERMOS_PROBLEMATICOS = {
 }
 
 def sanitizar_busca_fitness(query):
-    """Evita falsos positivos como fotos de bezerros (calf) ou países (Bulgaria)."""
     query_limpa = sanitizar_prompt(query).lower()
-    
-    # Substitui termos problemáticos conhecidos
+
     palavras = query_limpa.split()
     novas_palavras = []
     for p in palavras:
@@ -134,7 +127,6 @@ def sanitizar_busca_fitness(query):
             novas_palavras.append(p)
     query_limpa = " ".join(novas_palavras)
             
-    # Força contexto de academia/fitness se ausente
     palavras_chave_fitness = ["gym", "workout", "fitness", "athlete", "exercise", "sport", "running", "runner"]
     if not any(word in query_limpa for word in palavras_chave_fitness):
         query_limpa += " gym workout"
@@ -157,7 +149,6 @@ def baixar_bytes_midia(url):
 
 
 def obter_imagem_post(query_ingles, api_key, urls_usadas=None):
-    """Busca foto profissional real via Pexels ou fallback para IA, evitando duplicatas."""
     if urls_usadas is None:
         urls_usadas = set()
 
@@ -211,9 +202,6 @@ def buscar_video_pexels(query, api_key):
     except Exception:
         pass
     return None, None
-
-
-# --- GERAÇÃO E EXIBIÇÃO ---
 
 if btn_gerar:
     if not gemini_key:
@@ -300,7 +288,6 @@ if btn_gerar:
 
                 st.success("✨ Conteúdo gerado com sucesso pelo Gemini 3.6 Flash!")
 
-                # --- RESULTADO: POST FIXO ---
                 if tipo_formato == "Post Fixo":
                     c1, c2 = st.columns(2)
                     with c1:
@@ -321,7 +308,6 @@ if btn_gerar:
                         st.subheader("📝 Legenda")
                         st.text_area("Copie o texto:", dados.get("legenda"), height=300)
 
-                # --- RESULTADO: CARROSSEL ---
                 elif tipo_formato == "Carrossel":
                     slides = dados.get("slides", [])
                     cols = st.columns(min(len(slides), 5))
@@ -350,7 +336,6 @@ if btn_gerar:
                     st.subheader("📝 Legenda")
                     st.text_area("Copie o texto:", dados.get("legenda"), height=250)
 
-                # --- RESULTADO: VÍDEO ---
                 else:
                     cenas = dados.get("cenas", [])
                     st.subheader("🎬 Cenas do Vídeo & Mídias para Download")
@@ -366,7 +351,6 @@ if btn_gerar:
                             st.markdown(f"### Cena {num_c}")
                             st.write(f"🗣️ **Locução:** {narracao_c}")
 
-                            # Áudio
                             tts = gTTS(text=narracao_c, lang="pt", tld="com.br")
                             fp = io.BytesIO()
                             tts.write_to_fp(fp)
@@ -381,7 +365,6 @@ if btn_gerar:
                                 key=f"dl_audio_{num_c}",
                             )
 
-                            # Vídeo Pexels
                             if pexels_key:
                                 url_v, vid_bytes = buscar_video_pexels(busca_c, pexels_key)
                                 if url_v:
