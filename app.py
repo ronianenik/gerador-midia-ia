@@ -11,54 +11,31 @@ st.set_page_config(
     page_title="Central de Conteúdo IA",
     page_icon="📱",
     layout="wide",
-    initial_sidebar_state="expanded",
 )
 
-# --- GERENCIAMENTO DE ESTADO / PROJETOS ---
-if "projetos" not in st.session_state:
-    st.session_state.projetos = ["Geral", "RS Fisioterapia e Quiropraxia"]
-
-# Secrets
+# --- CONFIGURAÇÃO DE SECRETS ---
 gemini_key = st.secrets.get("GEMINI_API_KEY", "")
 pexels_key = st.secrets.get("PEXELS_API_KEY", "")
 
-# --- BARRA LATERAL (SIDEBAR) ---
-with st.sidebar:
-    st.header("📁 Projetos")
-
-    # Criar novo projeto
-    with st.expander("➕ Criar Novo Projeto", expanded=False):
-        novo_proj = st.text_input(
-            "Nome do Projeto:", placeholder="Ex: Projeto Tráfego"
-        )
-        if st.button("Salvar Projeto"):
-            if novo_proj and novo_proj.strip() not in st.session_state.projetos:
-                st.session_state.projetos.append(novo_proj.strip())
-                st.success(f"Projeto '{novo_proj.strip()}' adicionado!")
-                st.rerun()
-
-    # Seleção do Projeto Ativo
-    projeto_ativo = st.selectbox(
-        "Selecione o projeto ativo:", st.session_state.projetos
-    )
-
-    st.divider()
-    st.header("⚙️ Status das APIs")
-    if gemini_key:
-        st.success("⚡ Gemini API: Conectado")
-    else:
-        st.error("❌ GEMINI_API_KEY ausente nos Secrets")
-
-    if pexels_key:
-        st.success("⚡ Pexels API: Conectado")
-    else:
-        st.warning("⚠️ PEXELS_API_KEY ausente (Vídeos indisponíveis)")
-
 # --- CABEÇALHO ---
 st.title("📱 Gerador Multi-Formato de Conteúdo")
-st.caption(f"📌 Projeto Ativo: **{projeto_ativo}**")
 
-# Seleção do formato
+# Status simples das APIs no topo
+col_st1, col_st2 = st.columns(2)
+with col_st1:
+    if gemini_key:
+        st.success("⚡ Gemini API: Conectado", icon="✅")
+    else:
+        st.error("❌ GEMINI_API_KEY ausente nos Secrets")
+with col_st2:
+    if pexels_key:
+        st.success("⚡ Pexels API (Fotos Reais & Vídeos): Conectado", icon="✅")
+    else:
+        st.warning("⚠️ PEXELS_API_KEY ausente (Usando IA para imagens)")
+
+st.divider()
+
+# --- SELEÇÃO DE FORMATO ---
 tipo_formato = st.radio(
     "Escolha o formato do conteúdo:",
     ["Post Fixo", "Carrossel", "Vídeo (Reels/TikTok)"],
@@ -72,11 +49,11 @@ with st.form("form_conteudo"):
         col1, col2 = st.columns(2)
         with col1:
             tema = st.text_input(
-                "Tema do conteúdo:", placeholder="Ex: Benefícios da quiropraxia"
+                "Tema do conteúdo:", placeholder="Ex: Exercícios essenciais para corredores"
             )
         with col2:
             publico = st.text_input(
-                "Público-alvo:", placeholder="Ex: Pessoas com dores nas costas"
+                "Público-alvo:", placeholder="Ex: Atletas corredores"
             )
         tom = "Educacional & Persuasivo"
         num_slides = 1
@@ -123,10 +100,9 @@ with st.form("form_conteudo"):
 
 # --- FUNÇÕES AUXILIARES ---
 
-
 def sanitizar_prompt(texto):
     if not texto:
-        return "fitness athletic photograph"
+        return "fitness athletic"
     texto_limpo = (
         str(texto)
         .replace("\n", " ")
@@ -134,22 +110,7 @@ def sanitizar_prompt(texto):
         .replace('"', "")
         .replace("'", "")
     )
-    return re.sub(r"\s+", " ", texto_limpo).strip()[:180]
-
-
-def gerar_url_imagem(prompt, aspecto="1080x1080"):
-    w, h = aspecto.split("x")
-    prompt_limpo = sanitizar_prompt(prompt)
-
-    # Injeção de parâmetros de fotografia profissional de alta fidelidade
-    prompt_fotografico = (
-        f"Professional photo, {prompt_limpo}, realistic human proportions, "
-        f"shot on 35mm lens, natural lighting, sharp focus, cinematic studio photography, high resolution"
-    )
-
-    prompt_encoded = urllib.parse.quote(prompt_fotografico)
-    # Ativação do modelo FLUX no Pollinations para anatomia e realismo superiores
-    return f"https://image.pollinations.ai/prompt/{prompt_encoded}?width={w}&height={h}&nologo=true&model=flux&enhance=true"
+    return re.sub(r"\s+", " ", texto_limpo).strip()[:150]
 
 
 def baixar_bytes_midia(url):
@@ -157,15 +118,38 @@ def baixar_bytes_midia(url):
         resp = requests.get(
             url,
             timeout=12,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-            },
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
         )
         if resp.status_code == 200:
             return resp.content
     except Exception:
         pass
     return None
+
+
+def obter_imagem_post(query_ingles, api_key):
+    """Busca foto profissional real via Pexels ou fallback para IA"""
+    query_limpa = sanitizar_prompt(query_ingles)
+    
+    # 1. Tenta buscar Foto Real no Pexels
+    if api_key:
+        url_pexels = f"https://api.pexels.com/v1/search?query={urllib.parse.quote(query_limpa)}&per_page=1&orientation=square"
+        headers = {"Authorization": api_key}
+        try:
+            resp = requests.get(url_pexels, headers=headers, timeout=8)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("photos"):
+                    src_img = data["photos"][0]["src"].get("large2x") or data["photos"][0]["src"].get("medium")
+                    img_bytes = baixar_bytes_midia(src_img)
+                    return src_img, img_bytes
+        except Exception:
+            pass
+
+    # 2. Fallback caso Pexels não retorne ou não tenha chave
+    prompt_encoded = urllib.parse.quote(f"{query_limpa}, professional photographic portrait, sharp focus")
+    url_ia = f"https://image.pollinations.ai/prompt/{prompt_encoded}?width=1080&height=1080&nologo=true&model=flux"
+    return url_ia, baixar_bytes_midia(url_ia)
 
 
 def buscar_video_pexels(query, api_key):
@@ -197,26 +181,26 @@ if btn_gerar:
     elif not tema:
         st.warning("Preencha o tema do conteúdo.")
     else:
-        with st.spinner("🤖 A IA está criando o conteúdo e gerando imagens fotográficas..."):
+        with st.spinner("🤖 A IA está criando o conteúdo e selecionando as melhores mídias..."):
             try:
                 genai.configure(api_key=gemini_key)
                 model = genai.GenerativeModel("gemini-3.6-flash")
 
                 if tipo_formato == "Post Fixo":
                     prompt_sistema = f"""
-                    Crie um Post Fixo para o projeto '{projeto_ativo}'.
+                    Crie um Post Fixo.
                     Tema: {tema}. Público: {publico}. Tom: {tom}.
                     Responda ESTRITAMENTE em JSON sem quebras de linha nos valores:
                     {{
                         "titulo_imagem": "Texto de impacto para a arte",
-                        "prompt_imagem": "A clear, realistic English photography prompt of the subject in a clean background setting. Focus on natural human pose and clear environment.",
+                        "busca_imagem": "2 a 3 palavras em ingles simples para buscar uma foto profissional real (ex: runner squat gym)",
                         "legenda": "Legenda completa com hashtags"
                     }}
                     """
 
                 elif tipo_formato == "Carrossel":
                     prompt_sistema = f"""
-                    Crie um Carrossel de {num_slides} slides para o projeto '{projeto_ativo}'.
+                    Crie um Carrossel de {num_slides} slides.
                     Tema: {tema}. Público: {publico}. Tom: {tom}.
                     Responda ESTRITAMENTE em JSON sem quebras de linha nos valores:
                     {{
@@ -224,7 +208,7 @@ if btn_gerar:
                             {{
                                 "numero": 1,
                                 "texto_slide": "Resumo do slide",
-                                "prompt_imagem": "A descriptive English photograph prompt representing slide 1. Clean composition with natural photographic lighting."
+                                "busca_imagem": "2 a 3 palavras em ingles simples para buscar foto profissional para o slide"
                             }}
                         ],
                         "legenda": "Legenda do post"
@@ -233,7 +217,7 @@ if btn_gerar:
 
                 else:  # Vídeo
                     prompt_sistema = f"""
-                    Crie um roteiro em {num_slides} cenas curtas para o projeto '{projeto_ativo}'.
+                    Crie um roteiro em {num_slides} cenas curtas.
                     Tema: {tema}. Público: {publico}. Tom: {tom}.
                     Responda ESTRITAMENTE em JSON sem quebras de linha nos valores:
                     {{
@@ -241,7 +225,7 @@ if btn_gerar:
                             {{
                                 "numero": 1,
                                 "narracao": "Texto curto falado na cena",
-                                "busca_pexels": "two english keywords for stock video"
+                                "busca_pexels": "two english keywords for stock video search"
                             }}
                         ],
                         "legenda": "Legenda do post"
@@ -250,39 +234,32 @@ if btn_gerar:
 
                 response = model.generate_content(
                     prompt_sistema,
-                    generation_config={
-                        "response_mime_type": "application/json"
-                    },
+                    generation_config={"response_mime_type": "application/json"},
                 )
                 dados = json.loads(response.text)
 
-                st.success(f"✨ Conteúdo para '{projeto_ativo}' gerado com sucesso!")
+                st.success("✨ Conteúdo gerado com sucesso!")
 
                 # --- RESULTADO: POST FIXO ---
                 if tipo_formato == "Post Fixo":
                     c1, c2 = st.columns(2)
                     with c1:
-                        url_img = gerar_url_imagem(
-                            dados.get("prompt_imagem", tema)
-                        )
+                        busca_img = dados.get("busca_imagem", tema)
+                        url_img, img_bytes = obter_imagem_post(busca_img, pexels_key)
+                        
                         st.image(url_img, use_container_width=True)
-                        st.info(
-                            f"💡 **Texto na Imagem:** {dados.get('titulo_imagem')}"
-                        )
+                        st.info(f"💡 **Texto na Imagem:** {dados.get('titulo_imagem')}")
 
-                        img_bytes = baixar_bytes_midia(url_img)
                         if img_bytes:
                             st.download_button(
-                                "📥 Baixar Imagem",
+                                "📥 Baixar Imagem HD",
                                 img_bytes,
                                 "post_fixo.jpg",
                                 "image/jpeg",
                             )
                     with c2:
                         st.subheader("📝 Legenda")
-                        st.text_area(
-                            "Copie o texto:", dados.get("legenda"), height=300
-                        )
+                        st.text_area("Copie o texto:", dados.get("legenda"), height=300)
 
                 # --- RESULTADO: CARROSSEL ---
                 elif tipo_formato == "Carrossel":
@@ -293,26 +270,24 @@ if btn_gerar:
                         col_target = cols[idx % 5]
                         with col_target:
                             st.markdown(f"**Slide {slide.get('numero')}**")
-                            url_img = gerar_url_imagem(
-                                slide.get("prompt_imagem", tema)
-                            )
+                            busca_img = slide.get("busca_imagem", tema)
+                            url_img, img_bytes = obter_imagem_post(busca_img, pexels_key)
+                            
                             st.image(url_img, use_container_width=True)
                             st.caption(slide.get("texto_slide"))
 
-                            img_bytes = baixar_bytes_midia(url_img)
                             if img_bytes:
                                 st.download_button(
                                     f"📥 Slide {slide.get('numero')}",
                                     img_bytes,
                                     f"slide_{slide.get('numero')}.jpg",
                                     "image/jpeg",
+                                    key=f"dl_slide_{idx}",
                                 )
 
                     st.divider()
                     st.subheader("📝 Legenda")
-                    st.text_area(
-                        "Copie o texto:", dados.get("legenda"), height=250
-                    )
+                    st.text_area("Copie o texto:", dados.get("legenda"), height=250)
 
                 # --- RESULTADO: VÍDEO ---
                 else:
@@ -330,6 +305,7 @@ if btn_gerar:
                             st.markdown(f"### Cena {num_c}")
                             st.write(f"🗣️ **Locução:** {narracao_c}")
 
+                            # Áudio
                             tts = gTTS(text=narracao_c, lang="pt", tld="com.br")
                             fp = io.BytesIO()
                             tts.write_to_fp(fp)
@@ -344,10 +320,9 @@ if btn_gerar:
                                 key=f"dl_audio_{num_c}",
                             )
 
+                            # Vídeo Pexels
                             if pexels_key:
-                                url_v, vid_bytes = buscar_video_pexels(
-                                    busca_c, pexels_key
-                                )
+                                url_v, vid_bytes = buscar_video_pexels(busca_c, pexels_key)
                                 if url_v:
                                     st.video(url_v)
                                     if vid_bytes:
@@ -365,9 +340,7 @@ if btn_gerar:
 
                     st.divider()
                     st.subheader("📝 Legenda do Vídeo")
-                    st.text_area(
-                        "Copie o texto:", dados.get("legenda"), height=200
-                    )
+                    st.text_area("Copie o texto:", dados.get("legenda"), height=200)
 
             except Exception as e:
                 st.error(f"Ocorreu um erro ao processar: {e}")
