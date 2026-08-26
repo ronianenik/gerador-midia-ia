@@ -1,21 +1,11 @@
 import io
 import json
-import os
 import re
-import tempfile
 import urllib.parse
 from gtts import gTTS
 import google.generativeai as genai
 import requests
 import streamlit as st
-
-# Tenta importar MoviePy com tratamento de exceção
-try:
-    from moviepy.editor import AudioFileClip, VideoFileClip, concatenate_videoclips
-
-    MOVIEPY_DISPONIVEL = True
-except Exception:
-    MOVIEPY_DISPONIVEL = False
 
 st.set_page_config(
     page_title="Central de Conteúdo IA",
@@ -24,16 +14,35 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-st.title("📱 Gerador Multi-Formato de Conteúdo com IA")
-st.markdown(
-    "Crie Posts Fixos, Carrosséis ou Vídeos curtos com mídias e áudio sincronizado."
-)
+# --- GERENCIAMENTO DE ESTADO / PROJETOS ---
+if "projetos" not in st.session_state:
+    st.session_state.projetos = ["Geral", "RS Fisioterapia e Quiropraxia"]
 
-# Chaves vindas do Streamlit Secrets
+# Secrets
 gemini_key = st.secrets.get("GEMINI_API_KEY", "")
 pexels_key = st.secrets.get("PEXELS_API_KEY", "")
 
+# --- BARRA LATERAL (SIDEBAR) ---
 with st.sidebar:
+    st.header("📁 Projetos")
+
+    # Criar novo projeto
+    with st.expander("➕ Criar Novo Projeto", expanded=False):
+        novo_proj = st.text_input(
+            "Nome do Projeto:", placeholder="Ex: Projeto Tráfego"
+        )
+        if st.button("Salvar Projeto"):
+            if novo_proj and novo_proj.strip() not in st.session_state.projetos:
+                st.session_state.projetos.append(novo_proj.strip())
+                st.success(f"Projeto '{novo_proj.strip()}' adicionado!")
+                st.rerun()
+
+    # Seleção do Projeto Ativo
+    projeto_ativo = st.selectbox(
+        "Selecione o projeto ativo:", st.session_state.projetos
+    )
+
+    st.divider()
     st.header("⚙️ Status das APIs")
     if gemini_key:
         st.success("⚡ Gemini API: Conectado")
@@ -45,34 +54,72 @@ with st.sidebar:
     else:
         st.warning("⚠️ PEXELS_API_KEY ausente (Vídeos indisponíveis)")
 
-# Formulário
-with st.form("form_conteudo"):
-    tipo_formato = st.radio(
-        "Escolha o formato do conteúdo:",
-        ["Post Fixo", "Carrossel", "Vídeo (Reels/TikTok)"],
-        horizontal=True,
-    )
+# --- CABEÇALHO ---
+st.title("📱 Gerador Multi-Formato de Conteúdo")
+st.caption(f"📌 Projeto Ativo: **{projeto_ativo}**")
 
-    col1, col2 = st.columns(2)
-    with col1:
-        tema = st.text_input(
-            "Tema do conteúdo:",
-            placeholder="Ex: 3 exercícios de musculação para corredores",
-        )
-        tom = st.selectbox(
-            "Tom de voz:",
-            [
-                "Educacional & Técnico",
-                "Descontraído & Dinâmico",
-                "Motivacional & Inspirador",
-                "Vendedor & Persuasivo",
-            ],
-        )
-    with col2:
-        publico = st.text_input(
-            "Público-alvo:", placeholder="Ex: Atletas corredores"
-        )
-        num_slides = st.slider("Quantidade de slides/cenas:", 3, 5, 3)
+# Seleção do formato fora do formulário para atualizar os campos em tempo real
+tipo_formato = st.radio(
+    "Escolha o formato do conteúdo:",
+    ["Post Fixo", "Carrossel", "Vídeo (Reels/TikTok)"],
+    horizontal=True,
+)
+
+# --- FORMULÁRIO COM CAMPOS DINÂMICOS ---
+with st.form("form_conteudo"):
+
+    # 1. Post Fixo: Apenas Tema e Público-alvo
+    if tipo_formato == "Post Fixo":
+        col1, col2 = st.columns(2)
+        with col1:
+            tema = st.text_input(
+                "Tema do conteúdo:", placeholder="Ex: Benefícios da quiropraxia"
+            )
+        with col2:
+            publico = st.text_input(
+                "Público-alvo:", placeholder="Ex: Pessoas com dores nas costas"
+            )
+        tom = "Educacional & Persuasivo"
+        num_slides = 1
+
+    # 2. Carrossel: Tema, Público-alvo e Quantidade de Slides
+    elif tipo_formato == "Carrossel":
+        col1, col2, col3 = st.columns([2, 2, 1])
+        with col1:
+            tema = st.text_input(
+                "Tema do conteúdo:", placeholder="Ex: 5 Alongamentos pós-corrida"
+            )
+        with col2:
+            publico = st.text_input(
+                "Público-alvo:", placeholder="Ex: Corredores de rua"
+            )
+        with col3:
+            num_slides = st.slider("Quantidade de slides:", 3, 7, 5)
+        tom = "Educacional & Técnico"
+
+    # 3. Vídeo: Tema, Público-alvo e Tom de Voz
+    else:
+        col1, col2, col3 = st.columns([2, 2, 2])
+        with col1:
+            tema = st.text_input(
+                "Tema do conteúdo:",
+                placeholder="Ex: 3 exercícios essenciais para corredores",
+            )
+        with col2:
+            publico = st.text_input(
+                "Público-alvo:", placeholder="Ex: Atletas corredores"
+            )
+        with col3:
+            tom = st.selectbox(
+                "Tom de voz:",
+                [
+                    "Educacional & Técnico",
+                    "Descontraído & Dinâmico",
+                    "Motivacional & Inspirador",
+                    "Vendedor & Persuasivo",
+                ],
+            )
+        num_slides = 3  # Padrão de 3 cenas curtas para reels/tiktok
 
     btn_gerar = st.form_submit_button("🚀 Gerar Conteúdo Completo")
 
@@ -90,8 +137,7 @@ def sanitizar_prompt(texto):
         .replace('"', "")
         .replace("'", "")
     )
-    texto_limpo = re.sub(r"\s+", " ", texto_limpo).strip()
-    return texto_limpo[:150]
+    return re.sub(r"\s+", " ", texto_limpo).strip()[:150]
 
 
 def gerar_url_imagem(prompt, aspecto="1080x1080"):
@@ -119,7 +165,7 @@ def baixar_bytes_midia(url):
 
 def buscar_video_pexels(query, api_key):
     if not api_key:
-        return None
+        return None, None
     query_limpa = sanitizar_prompt(query)
     url = f"https://api.pexels.com/videos/search?query={urllib.parse.quote(query_limpa)}&per_page=1&orientation=portrait"
     headers = {"Authorization": api_key}
@@ -129,113 +175,16 @@ def buscar_video_pexels(query, api_key):
             data = resp.json()
             if data.get("videos"):
                 video_files = data["videos"][0].get("video_files", [])
-                # Seleciona arquivos com menor resolução para economizar RAM
-                for v in video_files:
-                    if v.get("file_type") == "video/mp4" and (
-                        v.get("height", 0) <= 1280
-                    ):
-                        return v.get("link")
                 if video_files:
-                    return video_files[0].get("link")
+                    link_vid = video_files[0].get("link")
+                    vid_bytes = baixar_bytes_midia(link_vid)
+                    return link_vid, vid_bytes
     except Exception:
         pass
-    return None
+    return None, None
 
 
-def renderizar_video_otimizado(cenas, pexels_key):
-    """Processa o vídeo compilado em baixa resolução para não estourar a RAM do servidor."""
-    if not MOVIEPY_DISPONIVEL:
-        return None
-
-    clips = []
-    arquivos_temp = []
-
-    try:
-        for cena in cenas:
-            narracao = cena.get("narracao", "")
-            busca = cena.get("busca_pexels", "exercise")
-
-            # 1. Gerar Áudio
-            tts = gTTS(text=narracao, lang="pt", tld="com.br")
-            f_audio = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-            tts.save(f_audio.name)
-            f_audio.close()
-            arquivos_temp.append(f_audio.name)
-            audio_clip = AudioFileClip(f_audio.name)
-
-            # 2. Buscar e carregar Vídeo
-            url_vid = buscar_video_pexels(busca, pexels_key)
-            if not url_vid:
-                url_vid = buscar_video_pexels("fitness sports", pexels_key)
-
-            if url_vid:
-                vid_content = baixar_bytes_midia(url_vid)
-                if vid_content:
-                    f_vid = tempfile.NamedTemporaryFile(
-                        delete=False, suffix=".mp4"
-                    )
-                    f_vid.write(vid_content)
-                    f_vid.close()
-                    arquivos_temp.append(f_vid.name)
-
-                    video_clip = VideoFileClip(f_vid.name)
-                    duracao_audio = audio_clip.duration
-
-                    # Ajusta a duração do vídeo de acordo com a locução
-                    if video_clip.duration < duracao_audio:
-                        video_clip = video_clip.loop(duration=duracao_audio)
-                    else:
-                        video_clip = video_clip.subclip(0, duracao_audio)
-
-                    # Redimensiona para resolução leve de celular (360x640)
-                    video_clip = video_clip.resize(height=640)
-                    video_clip = video_clip.set_audio(audio_clip)
-                    clips.append(video_clip)
-
-        if clips:
-            video_final = concatenate_videoclips(clips, method="compose")
-            f_output = tempfile.NamedTemporaryFile(
-                delete=False, suffix=".mp4"
-            )
-            f_output.close()
-            arquivos_temp.append(f_output.name)
-
-            # Configuração de renderização de baixo consumo de memória
-            video_final.write_videofile(
-                f_output.name,
-                codec="libx264",
-                audio_codec="aac",
-                fps=15,
-                preset="ultrafast",
-                threads=1,
-                bitrate="800k",
-                logger=None,
-            )
-
-            with open(f_output.name, "rb") as f:
-                video_bytes = f.read()
-
-            # Fecha e limpa da memória
-            for c in clips:
-                c.close()
-            video_final.close()
-
-            return video_bytes
-
-    except Exception:
-        return None
-
-    finally:
-        for f_path in arquivos_temp:
-            if os.path.exists(f_path):
-                try:
-                    os.remove(f_path)
-                except Exception:
-                    pass
-    return None
-
-
-# --- EXECUÇÃO ---
+# --- GERAÇÃO E EXIBIÇÃO ---
 
 if btn_gerar:
     if not gemini_key:
@@ -246,11 +195,12 @@ if btn_gerar:
         with st.spinner("🤖 A IA está criando o conteúdo..."):
             try:
                 genai.configure(api_key=gemini_key)
-                model = genai.GenerativeModel("gemini-3.6-flash")
+                model = genai.GenerativeModel("gemini-2.5-flash")
 
                 if tipo_formato == "Post Fixo":
                     prompt_sistema = f"""
-                    Crie um Post Fixo sobre: {tema}. Público: {publico}. Tom: {tom}.
+                    Crie um Post Fixo para o projeto '{projeto_ativo}'.
+                    Tema: {tema}. Público: {publico}. Tom: {tom}.
                     Responda ESTRITAMENTE em JSON sem quebras de linha nos valores:
                     {{
                         "titulo_imagem": "Texto de impacto para a arte",
@@ -261,7 +211,8 @@ if btn_gerar:
 
                 elif tipo_formato == "Carrossel":
                     prompt_sistema = f"""
-                    Crie um Carrossel de {num_slides} slides sobre: {tema}. Público: {publico}. Tom: {tom}.
+                    Crie um Carrossel de {num_slides} slides para o projeto '{projeto_ativo}'.
+                    Tema: {tema}. Público: {publico}. Tom: {tom}.
                     Responda ESTRITAMENTE em JSON sem quebras de linha nos valores:
                     {{
                         "slides": [
@@ -277,7 +228,8 @@ if btn_gerar:
 
                 else:  # Vídeo
                     prompt_sistema = f"""
-                    Crie um roteiro em {num_slides} cenas curtas sobre: {tema}. Público: {publico}. Tom: {tom}.
+                    Crie um roteiro em {num_slides} cenas curtas para o projeto '{projeto_ativo}'.
+                    Tema: {tema}. Público: {publico}. Tom: {tom}.
                     Responda ESTRITAMENTE em JSON sem quebras de linha nos valores:
                     {{
                         "cenas": [
@@ -299,9 +251,9 @@ if btn_gerar:
                 )
                 dados = json.loads(response.text)
 
-                st.success("✨ Conteúdo gerado com sucesso!")
+                st.success(f"✨ Conteúdo para '{projeto_ativo}' gerado com sucesso!")
 
-                # --- EXIBIÇÃO: POST FIXO ---
+                # --- RESULTADO: POST FIXO ---
                 if tipo_formato == "Post Fixo":
                     c1, c2 = st.columns(2)
                     with c1:
@@ -327,7 +279,7 @@ if btn_gerar:
                             "Copie o texto:", dados.get("legenda"), height=300
                         )
 
-                # --- EXIBIÇÃO: CARROSSEL ---
+                # --- RESULTADO: CARROSSEL ---
                 elif tipo_formato == "Carrossel":
                     slides = dados.get("slides", [])
                     cols = st.columns(min(len(slides), 5))
@@ -357,72 +309,62 @@ if btn_gerar:
                         "Copie o texto:", dados.get("legenda"), height=250
                     )
 
-                # --- EXIBIÇÃO: VÍDEO ---
+                # --- RESULTADO: VÍDEO (COM DOWNLOADS INDIVIDUAIS) ---
                 else:
                     cenas = dados.get("cenas", [])
-                    c1, c2 = st.columns([1, 1])
+                    st.subheader("🎬 Cenas do Vídeo & Mídias para Download")
 
-                    with c1:
-                        st.subheader("🎬 Vídeo Sincronizado")
-                        video_bytes = None
+                    cols_cenas = st.columns(len(cenas))
+                    for idx, cena in enumerate(cenas):
+                        col_target = cols_cenas[idx]
+                        num_c = cena.get("numero")
+                        narracao_c = cena.get("narracao")
+                        busca_c = cena.get("busca_pexels")
 
-                        if pexels_key:
-                            with st.spinner(
-                                "🎥 Processando cortes e áudio em modo leve..."
-                            ):
-                                video_bytes = renderizar_video_otimizado(
-                                    cenas, pexels_key
-                                )
+                        with col_target:
+                            st.markdown(f"### Cena {num_c}")
+                            st.write(f"🗣️ **Locução:** {narracao_c}")
 
-                        if video_bytes:
-                            st.video(video_bytes)
-                            st.download_button(
-                                "📥 Baixar Vídeo MP4",
-                                video_bytes,
-                                "video_final.mp4",
-                                "video/mp4",
-                            )
-                        else:
-                            st.warning(
-                                "⚠️ O servidor atingiu o limite de memória para exportar o MP4 único."
-                            )
-                            st.info(
-                                "Abaixo você pode ver o vídeo e ouvir a narração por cena:"
-                            )
-
-                    with c2:
-                        st.subheader("🗣️ Roteiro e Narração por Cena")
-                        for cena in cenas:
-                            st.write(
-                                f"**Cena {cena.get('numero')}:** {cena.get('narracao')}"
-                            )
-
-                            tts = gTTS(
-                                text=cena.get("narracao"),
-                                lang="pt",
-                                tld="com.br",
-                            )
+                            # 1. Áudio Narração + Botão Download Áudio
+                            tts = gTTS(text=narracao_c, lang="pt", tld="com.br")
                             fp = io.BytesIO()
                             tts.write_to_fp(fp)
-                            fp.seek(0)
-                            st.audio(fp, format="audio/mp3")
+                            audio_bytes = fp.getvalue()
 
+                            st.audio(audio_bytes, format="audio/mp3")
+                            st.download_button(
+                                f"📥 Baixar Áudio C{num_c}",
+                                audio_bytes,
+                                file_name=f"audio_cena_{num_c}.mp3",
+                                mime="audio/mp3",
+                                key=f"dl_audio_{num_c}",
+                            )
+
+                            # 2. Vídeo Pexels + Botão Download Vídeo
                             if pexels_key:
-                                url_v = buscar_video_pexels(
-                                    cena.get("busca_pexels"), pexels_key
+                                url_v, vid_bytes = buscar_video_pexels(
+                                    busca_c, pexels_key
                                 )
                                 if url_v:
                                     st.video(url_v)
+                                    if vid_bytes:
+                                        st.download_button(
+                                            f"📥 Baixar Vídeo C{num_c}",
+                                            vid_bytes,
+                                            file_name=f"video_cena_{num_c}.mp4",
+                                            mime="video/mp4",
+                                            key=f"dl_vid_{num_c}",
+                                        )
+                                else:
+                                    st.caption("🎥 Vídeo não encontrado.")
 
-                            st.caption(
-                                f"Busca Pexels: `{cena.get('busca_pexels')}`"
-                            )
-                            st.divider()
+                            st.caption(f"🔍 Busca Pexels: `{busca_c}`")
 
-                        st.subheader("📝 Legenda do Vídeo")
-                        st.text_area(
-                            "Copie o texto:", dados.get("legenda"), height=200
-                        )
+                    st.divider()
+                    st.subheader("📝 Legenda do Vídeo")
+                    st.text_area(
+                        "Copie o texto:", dados.get("legenda"), height=200
+                    )
 
             except Exception as e:
                 st.error(f"Ocorreu um erro ao processar: {e}")
