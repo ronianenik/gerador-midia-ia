@@ -22,8 +22,8 @@ st.markdown(
 # Sidebar para chaves de API
 with st.sidebar:
     st.header("⚙️ Configurações")
-    gemini_key = st.secrets["AIzaSyCOTIZNTzcTgQbpcg6wGilfZk1gx5XsRJU"]
-    pexels_key = st.secrets["hd5W7fD9lT59927KHdfAiumi2p3Tk4jgtOIgAp2ZWLt38CbnUNGQQ4av"]
+    gemini_key = st.secrets["GEMINI_API_KEY"]
+    pexels_key = st.secrets["PEXELS_API_KEY"]
     st.info("💡 As chaves são gratuitas e não requerem cartão de crédito.")
 
 # Formulário Principal
