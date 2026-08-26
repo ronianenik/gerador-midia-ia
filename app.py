@@ -87,7 +87,7 @@ if btn_gerar:
         with st.spinner("🤖 A IA está escrevendo o roteiro e selecionando mídias..."):
             try:
                 genai.configure(api_key=gemini_key)
-                model = genai.GenerativeModel("gemini-2.5-flash")
+                model = genai.GenerativeModel("gemini-3.6-flash")
 
                 prompt_sistema = f"""
                 Você é um estrategista de conteúdo para mídias sociais especializado em vídeos curtos.
