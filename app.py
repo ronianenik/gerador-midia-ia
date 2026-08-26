@@ -58,7 +58,7 @@ with st.sidebar:
 st.title("📱 Gerador Multi-Formato de Conteúdo")
 st.caption(f"📌 Projeto Ativo: **{projeto_ativo}**")
 
-# Seleção do formato fora do formulário para atualizar os campos em tempo real
+# Seleção do formato
 tipo_formato = st.radio(
     "Escolha o formato do conteúdo:",
     ["Post Fixo", "Carrossel", "Vídeo (Reels/TikTok)"],
@@ -68,7 +68,6 @@ tipo_formato = st.radio(
 # --- FORMULÁRIO COM CAMPOS DINÂMICOS ---
 with st.form("form_conteudo"):
 
-    # 1. Post Fixo: Apenas Tema e Público-alvo
     if tipo_formato == "Post Fixo":
         col1, col2 = st.columns(2)
         with col1:
@@ -82,7 +81,6 @@ with st.form("form_conteudo"):
         tom = "Educacional & Persuasivo"
         num_slides = 1
 
-    # 2. Carrossel: Tema, Público-alvo e Quantidade de Slides
     elif tipo_formato == "Carrossel":
         col1, col2, col3 = st.columns([2, 2, 1])
         with col1:
@@ -97,7 +95,6 @@ with st.form("form_conteudo"):
             num_slides = st.slider("Quantidade de slides:", 3, 7, 5)
         tom = "Educacional & Técnico"
 
-    # 3. Vídeo: Tema, Público-alvo e Tom de Voz
     else:
         col1, col2, col3 = st.columns([2, 2, 2])
         with col1:
@@ -119,7 +116,7 @@ with st.form("form_conteudo"):
                     "Vendedor & Persuasivo",
                 ],
             )
-        num_slides = 3  # Padrão de 3 cenas curtas para reels/tiktok
+        num_slides = 3
 
     btn_gerar = st.form_submit_button("🚀 Gerar Conteúdo Completo")
 
@@ -129,7 +126,7 @@ with st.form("form_conteudo"):
 
 def sanitizar_prompt(texto):
     if not texto:
-        return "sports workout"
+        return "fitness athletic photograph"
     texto_limpo = (
         str(texto)
         .replace("\n", " ")
@@ -137,21 +134,29 @@ def sanitizar_prompt(texto):
         .replace('"', "")
         .replace("'", "")
     )
-    return re.sub(r"\s+", " ", texto_limpo).strip()[:150]
+    return re.sub(r"\s+", " ", texto_limpo).strip()[:180]
 
 
 def gerar_url_imagem(prompt, aspecto="1080x1080"):
     w, h = aspecto.split("x")
     prompt_limpo = sanitizar_prompt(prompt)
-    prompt_encoded = urllib.parse.quote(f"{prompt_limpo}, high quality, photography")
-    return f"https://image.pollinations.ai/prompt/{prompt_encoded}?width={w}&height={h}&nologo=true"
+
+    # Injeção de parâmetros de fotografia profissional de alta fidelidade
+    prompt_fotografico = (
+        f"Professional photo, {prompt_limpo}, realistic human proportions, "
+        f"shot on 35mm lens, natural lighting, sharp focus, cinematic studio photography, high resolution"
+    )
+
+    prompt_encoded = urllib.parse.quote(prompt_fotografico)
+    # Ativação do modelo FLUX no Pollinations para anatomia e realismo superiores
+    return f"https://image.pollinations.ai/prompt/{prompt_encoded}?width={w}&height={h}&nologo=true&model=flux&enhance=true"
 
 
 def baixar_bytes_midia(url):
     try:
         resp = requests.get(
             url,
-            timeout=10,
+            timeout=12,
             headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
             },
@@ -192,7 +197,7 @@ if btn_gerar:
     elif not tema:
         st.warning("Preencha o tema do conteúdo.")
     else:
-        with st.spinner("🤖 A IA está criando o conteúdo..."):
+        with st.spinner("🤖 A IA está criando o conteúdo e gerando imagens fotográficas..."):
             try:
                 genai.configure(api_key=gemini_key)
                 model = genai.GenerativeModel("gemini-3.6-flash")
@@ -204,7 +209,7 @@ if btn_gerar:
                     Responda ESTRITAMENTE em JSON sem quebras de linha nos valores:
                     {{
                         "titulo_imagem": "Texto de impacto para a arte",
-                        "prompt_imagem": "Prompt curto em ingles descrevendo a imagem fotográfica sem aspas",
+                        "prompt_imagem": "A clear, realistic English photography prompt of the subject in a clean background setting. Focus on natural human pose and clear environment.",
                         "legenda": "Legenda completa com hashtags"
                     }}
                     """
@@ -219,7 +224,7 @@ if btn_gerar:
                             {{
                                 "numero": 1,
                                 "texto_slide": "Resumo do slide",
-                                "prompt_imagem": "Prompt curto em ingles para a imagem do slide sem aspas"
+                                "prompt_imagem": "A descriptive English photograph prompt representing slide 1. Clean composition with natural photographic lighting."
                             }}
                         ],
                         "legenda": "Legenda do post"
@@ -236,7 +241,7 @@ if btn_gerar:
                             {{
                                 "numero": 1,
                                 "narracao": "Texto curto falado na cena",
-                                "busca_pexels": "duas palavras em ingles para busca de video"
+                                "busca_pexels": "two english keywords for stock video"
                             }}
                         ],
                         "legenda": "Legenda do post"
@@ -309,7 +314,7 @@ if btn_gerar:
                         "Copie o texto:", dados.get("legenda"), height=250
                     )
 
-                # --- RESULTADO: VÍDEO (COM DOWNLOADS INDIVIDUAIS) ---
+                # --- RESULTADO: VÍDEO ---
                 else:
                     cenas = dados.get("cenas", [])
                     st.subheader("🎬 Cenas do Vídeo & Mídias para Download")
@@ -325,7 +330,6 @@ if btn_gerar:
                             st.markdown(f"### Cena {num_c}")
                             st.write(f"🗣️ **Locução:** {narracao_c}")
 
-                            # 1. Áudio Narração + Botão Download Áudio
                             tts = gTTS(text=narracao_c, lang="pt", tld="com.br")
                             fp = io.BytesIO()
                             tts.write_to_fp(fp)
@@ -340,7 +344,6 @@ if btn_gerar:
                                 key=f"dl_audio_{num_c}",
                             )
 
-                            # 2. Vídeo Pexels + Botão Download Vídeo
                             if pexels_key:
                                 url_v, vid_bytes = buscar_video_pexels(
                                     busca_c, pexels_key
