@@ -1,36 +1,44 @@
+import io
 import json
 import urllib.parse
+from gtts import gTTS
 import google.generativeai as genai
 import requests
 import streamlit as st
 
 # Configuração da página Web
 st.set_page_config(
-    page_title="Gerador de Conteúdo IA",
-    page_icon="🎬",
+    page_title="Central de Conteúdo IA",
+    page_icon="📱",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-st.title("🎬 Gerador Inteligente de Roteiros e Mídias")
+st.title("📱 Gerador Multi-Formato de Conteúdo com IA")
 st.markdown(
-    "Crie roteiros dinâmicos para vídeos curtos (Reels/TikTok/Shorts) com sugestões de vídeos e capa por IA."
+    "Crie Posts Fixos, Carrosséis ou Vídeos completos com mídias, áudio em MP3 e legendas prontas para publicação."
 )
 
 # Sidebar para chaves de API
 with st.sidebar:
     st.header("⚙️ Configurações")
-    gemini_key = st.text_input("Chave Gemini API", type="password")
-    pexels_key = st.text_input("Chave Pexels API", type="password")
+    gemini_key = st.secrets["AIzaSyCOTIZNTzcTgQbpcg6wGilfZk1gx5XsRJU"]
+    pexels_key = st.secrets["hd5W7fD9lT59927KHdfAiumi2p3Tk4jgtOIgAp2ZWLt38CbnUNGQQ4av"]
     st.info("💡 As chaves são gratuitas e não requerem cartão de crédito.")
 
 # Formulário Principal
 with st.form("form_conteudo"):
+    tipo_formato = st.radio(
+        "Escolha o formato do conteúdo:",
+        ["Post Fixo", "Carrossel", "Vídeo (Reels/TikTok)"],
+        horizontal=True,
+    )
+
     col1, col2 = st.columns(2)
     with col1:
         tema = st.text_input(
-            "Tema do vídeo:",
-            placeholder="Ex: 3 benefícios da quiropraxia para corredores",
+            "Tema do conteúdo:",
+            placeholder="Ex: 3 benefícios da musculação para corredores",
         )
         tom = st.selectbox(
             "Tom de voz:",
@@ -45,14 +53,18 @@ with st.form("form_conteudo"):
         publico = st.text_input(
             "Público-alvo:", placeholder="Ex: Atletas amadores e praticantes de corrida"
         )
-        duracao = st.select_slider(
-            "Duração aproximada:",
-            options=["15 segundos (3 cenas)", "30 segundos (5 cenas)", "60 segundos (8 cenas)"],
-        )
+        if tipo_formato == "Carrossel":
+            num_slides = st.slider("Quantidade de slides:", 3, 7, 5)
+        else:
+            num_slides = 5
 
-    btn_gerar = st.form_submit_button("🚀 Gerar Roteiro e Mídias")
+    btn_gerar = st.form_submit_button("🚀 Gerar Conteúdo Completo")
 
-# Função para buscar vídeo no Pexels
+
+# --- FUNÇÕES AUXILIARES ---
+
+
+# Busca de Vídeo no Pexels
 def buscar_video_pexels(query, api_key):
     if not api_key:
         return None
@@ -64,7 +76,6 @@ def buscar_video_pexels(query, api_key):
             data = resp.json()
             if data.get("videos"):
                 video_files = data["videos"][0].get("video_files", [])
-                # Busca por um arquivo de qualidade HD/SD em MP4
                 for v in video_files:
                     if v.get("file_type") == "video/mp4":
                         return v.get("link")
@@ -72,44 +83,77 @@ def buscar_video_pexels(query, api_key):
         pass
     return None
 
-# Função para gerar imagem via Pollinations.ai (Sem API Key)
-def gerar_url_imagem(prompt):
-    prompt_limpo = urllib.parse.quote(f"{prompt}, high quality, photorealistic, 4k")
-    return f"https://image.pollinations.ai/prompt/{prompt_limpo}?width=1080&height=1920&nologo=true"
 
-# Lógica de Geração
+# Geração de Imagem via Pollinations.ai (Grátis)
+def gerar_url_imagem(prompt, aspecto="1080x1080"):
+    w, h = aspecto.split("x")
+    prompt_limpo = urllib.parse.quote(f"{prompt}, high quality, professional photography, 4k")
+    return f"https://image.pollinations.ai/prompt/{prompt_limpo}?width={w}&height={h}&nologo=true"
+
+
+# Geração de Áudio com gTTS (Grátis)
+def gerar_audio_mp3(texto):
+    tts = gTTS(text=texto, lang="pt", tld="com.br")
+    fp = io.BytesIO()
+    tts.write_to_fp(fp)
+    fp.seek(0)
+    return fp
+
+
+# --- LÓGICA DE PROCESSAMENTO ---
+
 if btn_gerar:
     if not gemini_key:
         st.error("Por favor, insira sua chave do Gemini na barra lateral.")
     elif not tema:
-        st.warning("Por favor, digite um tema para o vídeo.")
+        st.warning("Por favor, digite um tema para o conteúdo.")
     else:
-        with st.spinner("🤖 A IA está escrevendo o roteiro e selecionando mídias..."):
+        with st.spinner("🤖 A IA está criando o conteúdo e preparando as mídias..."):
             try:
                 genai.configure(api_key=gemini_key)
-                model = genai.GenerativeModel("gemini-3.6-flash")
+                model = genai.GenerativeModel("gemini-2.5-flash")
 
-                prompt_sistema = f"""
-                Você é um estrategista de conteúdo para mídias sociais especializado em vídeos curtos.
-                Crie um roteiro para um vídeo com as seguintes especificações:
-                - Tema: {tema}
-                - Tom: {tom}
-                - Público-alvo: {publico}
-                - Formato: {duracao}
+                # Ajuste de prompts dependendo do formato escolhido
+                if tipo_formato == "Post Fixo":
+                    prompt_sistema = f"""
+                    Crie um Post Fixo para Instagram sobre: {tema}.
+                    Público: {publico}. Tom: {tom}.
+                    Responda EXCLUSIVAMENTE em JSON:
+                    {{
+                        "titulo_imagem": "Texto curto e chamativo (Headline) para a imagem",
+                        "prompt_imagem": "Prompt em INGLÊS para gerar a imagem de fundo fotográfica sobre o tema",
+                        "legenda": "Legenda completa do post com emojis e hashtags pertinentes"
+                    }}
+                    """
 
-                IMPORTANTE: Responda EXCLUSIVAMENTE em formato JSON com a seguinte estrutura:
-                {{
-                    "titulo": "Título chamativo do post",
-                    "descricao_capa": "Prompt curto em INGLÊS para gerar uma imagem de capa fotográfica e realista sobre o tema",
-                    "cenas": [
-                        {{
-                            "numero": 1,
-                            "narracao": "Texto da locução ou legenda da cena",
-                            "busca_pexels": "2 a 3 palavras-chave em INGLÊS para buscar um vídeo de stock no Pexels relativo a esta cena"
-                        }}
-                    ]
-                }}
-                """
+                elif tipo_formato == "Carrossel":
+                    prompt_sistema = f"""
+                    Crie um Carrossel de {num_slides} slides sobre: {tema}.
+                    Público: {publico}. Tom: {tom}.
+                    Responda EXCLUSIVAMENTE em JSON:
+                    {{
+                        "slides": [
+                            {{
+                                "numero": 1,
+                                "texto_slide": "Texto principal do slide",
+                                "prompt_imagem": "Prompt em INGLÊS para gerar imagem de fundo para este slide"
+                            }}
+                        ],
+                        "legenda": "Legenda completa do post para carrossel com chamada para ação, emojis e hashtags"
+                    }}
+                    """
+
+                else:  # Vídeo
+                    prompt_sistema = f"""
+                    Crie um roteiro de Vídeo curto (Reels/TikTok) sobre: {tema}.
+                    Público: {publico}. Tom: {tom}.
+                    Responda EXCLUSIVAMENTE em JSON:
+                    {{
+                        "texto_narracao": "Texto contínuo da narração/locução do vídeo para ser transformado em áudio",
+                        "busca_pexels": "2 palavras-chave em INGLÊS para buscar um vídeo de stock no Pexels",
+                        "legenda": "Legenda completa do vídeo com chamada para ação, emojis e hashtags"
+                    }}
+                    """
 
                 response = model.generate_content(
                     prompt_sistema,
@@ -117,37 +161,91 @@ if btn_gerar:
                 )
                 dados = json.loads(response.text)
 
-                st.success("✨ Roteiro gerado com sucesso!")
+                st.success("✨ Conteúdo gerado com sucesso!")
 
-                # Exibição do Título e Capa
-                st.subheader(f"📌 {dados.get('titulo')}")
-
-                col_capa, col_info = st.columns([1, 2])
-                with col_capa:
-                    url_capa = gerar_url_imagem(dados.get("descricao_capa", tema))
-                    st.image(url_capa, caption="Sugestão de Capa (IA)", use_container_width=True)
-                with col_info:
-                    st.markdown("**Estratégia de Capa:**")
-                    st.write(dados.get("descricao_capa"))
-
-                st.divider()
-                st.subheader("🎬 Cenas do Roteiro e Mídias Recomendadas")
-
-                # Iteração pelas cenas
-                for cena in dados.get("cenas", []):
-                    c1, c2 = st.columns([2, 1])
+                # --- EXIBIÇÃO: POST FIXO ---
+                if tipo_formato == "Post Fixo":
+                    c1, c2 = st.columns([1, 1])
                     with c1:
-                        st.markdown(f"### Cena {cena['numero']}")
-                        st.write(f"🗣️ **Locução / Legenda:** {cena['narracao']}")
-                        st.caption(f"🔍 Busca Pexels: `{cena['busca_pexels']}`")
+                        st.subheader("🖼️ Imagem do Post")
+                        url_img = gerar_url_imagem(dados.get("prompt_imagem"))
+                        st.image(url_img, use_container_width=True)
+                        st.info(f"💡 **Texto Sugerido na Imagem:** {dados.get('titulo_imagem')}")
+
+                        # Botão de download da imagem
+                        img_bytes = requests.get(url_img).content
+                        st.download_button(
+                            "📥 Baixar Imagem", img_bytes, "post_fixo.jpg", "image/jpeg"
+                        )
 
                     with c2:
-                        url_video = buscar_video_pexels(cena["busca_pexels"], pexels_key)
-                        if url_video:
-                            st.video(url_video)
-                        else:
-                            st.info("Vídeo de demonstração indisponível ou chave Pexels ausente.")
+                        st.subheader("📝 Legenda Pronta")
+                        st.text_area(
+                            "Copie e cole no Instagram:",
+                            dados.get("legenda"),
+                            height=350,
+                        )
+
+                # --- EXIBIÇÃO: CARROSSEL ---
+                elif tipo_formato == "Carrossel":
+                    st.subheader("🎨 Slides do Carrossel")
+                    slides = dados.get("slides", [])
+                    cols = st.columns(len(slides))
+
+                    for idx, slide in enumerate(slides):
+                        with cols[idx]:
+                            st.markdown(f"**Slide {slide['numero']}**")
+                            url_img = gerar_url_imagem(slide.get("prompt_imagem"))
+                            st.image(url_img, use_container_width=True)
+                            st.caption(f"✍️ {slide.get('texto_slide')}")
+
+                            # Botão para baixar slide
+                            img_bytes = requests.get(url_img).content
+                            st.download_button(
+                                f"📥 Baixar #{slide['numero']}",
+                                img_bytes,
+                                f"slide_{slide['numero']}.jpg",
+                                "image/jpeg",
+                            )
+
                     st.divider()
+                    st.subheader("📝 Legenda do Carrossel")
+                    st.text_area(
+                        "Copie e cole no Instagram:", dados.get("legenda"), height=250
+                    )
+
+                # --- EXIBIÇÃO: VÍDEO ---
+                else:
+                    c1, c2 = st.columns([1, 1])
+                    with c1:
+                        st.subheader("🎬 Vídeo de Stock Recomendado")
+                        url_vid = buscar_video_pexels(dados.get("busca_pexels"), pexels_key)
+                        if url_vid:
+                            st.video(url_vid)
+                            vid_bytes = requests.get(url_vid).content
+                            st.download_button(
+                                "📥 Baixar Vídeo MP4", vid_bytes, "video_stock.mp4", "video/mp4"
+                            )
+                        else:
+                            st.info(
+                                "Insira a chave do Pexels na barra lateral para carregar o vídeo de fundo."
+                            )
+
+                        st.subheader("🎙️ Narração do Vídeo (Áudio em Português)")
+                        audio_fp = gerar_audio_mp3(dados.get("texto_narracao"))
+                        st.audio(audio_fp, format="audio/mp3")
+                        st.download_button(
+                            "📥 Baixar Áudio MP3", audio_fp, "narracao.mp3", "audio/mp3"
+                        )
+
+                    with c2:
+                        st.subheader("🗣️ Roteiro da Narração")
+                        st.write(dados.get("texto_narracao"))
+                        st.divider()
+                        st.subheader("📝 Legenda do Vídeo")
+                        st.text_area(
+                            "Copie e cole nas redes:", dados.get("legenda"), height=250
+                        )
 
             except Exception as e:
                 st.error(f"Ocorreu um erro ao processar: {e}")
