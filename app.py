@@ -111,7 +111,7 @@ if btn_gerar:
         with st.spinner("🤖 A IA está criando o conteúdo e preparando as mídias..."):
             try:
                 genai.configure(api_key=gemini_key)
-                model = genai.GenerativeModel("gemini-2.5-flash")
+                model = genai.GenerativeModel("gemini-3.6-flash")
 
                 # Ajuste de prompts dependendo do formato escolhido
                 if tipo_formato == "Post Fixo":
