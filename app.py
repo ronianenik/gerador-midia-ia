@@ -8,7 +8,7 @@ import requests
 import streamlit as st
 
 st.set_page_config(
-    page_title="Central de Conteúdo IA",
+    page_title="Central de Conteúdo IA - Gemini 3.6 Flash",
     page_icon="📱",
     layout="wide",
 )
@@ -24,7 +24,7 @@ st.title("📱 Gerador Multi-Formato de Conteúdo")
 col_st1, col_st2 = st.columns(2)
 with col_st1:
     if gemini_key:
-        st.success("⚡ Gemini API: Conectado", icon="✅")
+        st.success("⚡ Gemini 3.6 Flash API: Conectado", icon="✅")
     else:
         st.error("❌ GEMINI_API_KEY ausente nos Secrets")
 with col_st2:
@@ -98,7 +98,7 @@ with st.form("form_conteudo"):
     btn_gerar = st.form_submit_button("🚀 Gerar Conteúdo Completo")
 
 
-# --- FUNÇÕES AUXILIARES ---
+# --- FUNÇÕES AUXILIARES & SANITIZAÇÃO FOTOGRÁFICA ---
 
 def sanitizar_prompt(texto):
     if not texto:
@@ -111,6 +111,35 @@ def sanitizar_prompt(texto):
         .replace("'", "")
     )
     return re.sub(r"\s+", " ", texto_limpo).strip()[:150]
+
+
+MAPA_TERMOS_PROBLEMATICOS = {
+    "bulgarian": "split squat gym workout",
+    "calf": "leg ankle exercise gym",
+    "calves": "leg workout gym athlete",
+    "turkey": "gym workout athlete",
+}
+
+def sanitizar_busca_fitness(query):
+    """Evita falsos positivos como fotos de bezerros (calf) ou países (Bulgaria)."""
+    query_limpa = sanitizar_prompt(query).lower()
+    
+    # Substitui termos problemáticos conhecidos
+    palavras = query_limpa.split()
+    novas_palavras = []
+    for p in palavras:
+        if p in MAPA_TERMOS_PROBLEMATICOS:
+            novas_palavras.append(MAPA_TERMOS_PROBLEMATICOS[p])
+        else:
+            novas_palavras.append(p)
+    query_limpa = " ".join(novas_palavras)
+            
+    # Força contexto de academia/fitness se ausente
+    palavras_chave_fitness = ["gym", "workout", "fitness", "athlete", "exercise", "sport", "running", "runner"]
+    if not any(word in query_limpa for word in palavras_chave_fitness):
+        query_limpa += " gym workout"
+        
+    return query_limpa
 
 
 def baixar_bytes_midia(url):
@@ -127,26 +156,37 @@ def baixar_bytes_midia(url):
     return None
 
 
-def obter_imagem_post(query_ingles, api_key):
-    """Busca foto profissional real via Pexels ou fallback para IA"""
-    query_limpa = sanitizar_prompt(query_ingles)
+def obter_imagem_post(query_ingles, api_key, urls_usadas=None):
+    """Busca foto profissional real via Pexels ou fallback para IA, evitando duplicatas."""
+    if urls_usadas is None:
+        urls_usadas = set()
+
+    query_limpa = sanitizar_busca_fitness(query_ingles)
     
     # 1. Tenta buscar Foto Real no Pexels
     if api_key:
-        url_pexels = f"https://api.pexels.com/v1/search?query={urllib.parse.quote(query_limpa)}&per_page=1&orientation=square"
+        url_pexels = f"https://api.pexels.com/v1/search?query={urllib.parse.quote(query_limpa)}&per_page=5&orientation=square"
         headers = {"Authorization": api_key}
         try:
             resp = requests.get(url_pexels, headers=headers, timeout=8)
             if resp.status_code == 200:
                 data = resp.json()
-                if data.get("photos"):
-                    src_img = data["photos"][0]["src"].get("large2x") or data["photos"][0]["src"].get("medium")
+                photos = data.get("photos", [])
+                for photo in photos:
+                    src_img = photo["src"].get("large2x") or photo["src"].get("medium")
+                    if src_img and src_img not in urls_usadas:
+                        urls_usadas.add(src_img)
+                        img_bytes = baixar_bytes_midia(src_img)
+                        return src_img, img_bytes
+                # Se todas já foram usadas, pega a primeira disponível
+                if photos:
+                    src_img = photos[0]["src"].get("large2x") or photos[0]["src"].get("medium")
                     img_bytes = baixar_bytes_midia(src_img)
                     return src_img, img_bytes
         except Exception:
             pass
 
-    # 2. Fallback caso Pexels não retorne ou não tenha chave
+    # 2. Fallback caso Pexels não retorne
     prompt_encoded = urllib.parse.quote(f"{query_limpa}, professional photographic portrait, sharp focus")
     url_ia = f"https://image.pollinations.ai/prompt/{prompt_encoded}?width=1080&height=1080&nologo=true&model=flux"
     return url_ia, baixar_bytes_midia(url_ia)
@@ -155,7 +195,7 @@ def obter_imagem_post(query_ingles, api_key):
 def buscar_video_pexels(query, api_key):
     if not api_key:
         return None, None
-    query_limpa = sanitizar_prompt(query)
+    query_limpa = sanitizar_busca_fitness(query)
     url = f"https://api.pexels.com/videos/search?query={urllib.parse.quote(query_limpa)}&per_page=1&orientation=portrait"
     headers = {"Authorization": api_key}
     try:
@@ -181,7 +221,7 @@ if btn_gerar:
     elif not tema:
         st.warning("Preencha o tema do conteúdo.")
     else:
-        with st.spinner("🤖 A IA está criando o conteúdo e selecionando as melhores mídias..."):
+        with st.spinner("🤖 O Gemini 3.6 Flash está criando o conteúdo e selecionando as imagens..."):
             try:
                 genai.configure(api_key=gemini_key)
                 model = genai.GenerativeModel("gemini-3.6-flash")
@@ -190,10 +230,16 @@ if btn_gerar:
                     prompt_sistema = f"""
                     Crie um Post Fixo.
                     Tema: {tema}. Público: {publico}. Tom: {tom}.
+
+                    REGRAS PARA "busca_imagem":
+                    - Use 3 a 4 palavras em INGLÊS focadas em fitness/academia.
+                    - NUNCA use palavras ambíguas como 'Bulgarian' (use 'split squat gym') ou 'calf' (use 'leg exercise gym').
+                    - SEMPRE inclua o contexto como 'gym', 'fitness', 'athlete' ou 'workout'.
+
                     Responda ESTRITAMENTE em JSON sem quebras de linha nos valores:
                     {{
                         "titulo_imagem": "Texto de impacto para a arte",
-                        "busca_imagem": "2 a 3 palavras em ingles simples para buscar uma foto profissional real (ex: runner squat gym)",
+                        "busca_imagem": "3 a 4 palavras em ingles com contexto de academia/fitness",
                         "legenda": "Legenda completa com hashtags"
                     }}
                     """
@@ -202,13 +248,22 @@ if btn_gerar:
                     prompt_sistema = f"""
                     Crie um Carrossel de {num_slides} slides.
                     Tema: {tema}. Público: {publico}. Tom: {tom}.
+
+                    REGRAS OBRIGATÓRIAS PARA "busca_imagem":
+                    - Cada slide DEVE ter um termo de busca DIFERENTE e específico em INGLÊS.
+                    - NUNCA use palavras ambíguas como 'Bulgarian' (use 'split squat gym') ou 'calf' (use 'leg workout gym').
+                    - SEMPRE inclua termos de contexto como 'gym', 'fitness', 'athlete' ou 'workout'.
+                    - Exemplo agachamento búlgaro: 'split squat gym workout'
+                    - Exemplo stiff: 'deadlift exercise gym athlete'
+                    - Exemplo panturrilha: 'leg ankle exercise gym'
+
                     Responda ESTRITAMENTE em JSON sem quebras de linha nos valores:
                     {{
                         "slides": [
                             {{
                                 "numero": 1,
                                 "texto_slide": "Resumo do slide",
-                                "busca_imagem": "2 a 3 palavras em ingles simples para buscar foto profissional para o slide"
+                                "busca_imagem": "3 a 4 palavras em ingles especificas para o exercicio/tema do slide"
                             }}
                         ],
                         "legenda": "Legenda do post"
@@ -219,13 +274,18 @@ if btn_gerar:
                     prompt_sistema = f"""
                     Crie um roteiro em {num_slides} cenas curtas.
                     Tema: {tema}. Público: {publico}. Tom: {tom}.
+
+                    REGRAS PARA "busca_pexels":
+                    - Use 2 a 3 palavras em INGLÊS específicas para a cena.
+                    - SEMPRE inclua contexto como 'gym', 'workout', 'runner' ou 'fitness'.
+
                     Responda ESTRITAMENTE em JSON sem quebras de linha nos valores:
                     {{
                         "cenas": [
                             {{
                                 "numero": 1,
                                 "narracao": "Texto curto falado na cena",
-                                "busca_pexels": "two english keywords for stock video search"
+                                "busca_pexels": "duas ou tres palavras em ingles para busca de video"
                             }}
                         ],
                         "legenda": "Legenda do post"
@@ -238,7 +298,7 @@ if btn_gerar:
                 )
                 dados = json.loads(response.text)
 
-                st.success("✨ Conteúdo gerado com sucesso!")
+                st.success("✨ Conteúdo gerado com sucesso pelo Gemini 3.6 Flash!")
 
                 # --- RESULTADO: POST FIXO ---
                 if tipo_formato == "Post Fixo":
@@ -265,13 +325,14 @@ if btn_gerar:
                 elif tipo_formato == "Carrossel":
                     slides = dados.get("slides", [])
                     cols = st.columns(min(len(slides), 5))
+                    urls_usadas = set()
 
                     for idx, slide in enumerate(slides):
                         col_target = cols[idx % 5]
                         with col_target:
                             st.markdown(f"**Slide {slide.get('numero')}**")
                             busca_img = slide.get("busca_imagem", tema)
-                            url_img, img_bytes = obter_imagem_post(busca_img, pexels_key)
+                            url_img, img_bytes = obter_imagem_post(busca_img, pexels_key, urls_usadas)
                             
                             st.image(url_img, use_container_width=True)
                             st.caption(slide.get("texto_slide"))
