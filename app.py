@@ -9,7 +9,7 @@ import google.generativeai as genai
 import requests
 import streamlit as st
 
-# Tenta importar MoviePy com fallback
+# Tenta importar MoviePy com tratamento de exceção
 try:
     from moviepy.editor import AudioFileClip, VideoFileClip, concatenate_videoclips
 
@@ -72,19 +72,24 @@ with st.form("form_conteudo"):
         publico = st.text_input(
             "Público-alvo:", placeholder="Ex: Atletas corredores"
         )
-        num_slides = st.slider("Quantidade de slides/cenas:", 3, 7, 4)
+        num_slides = st.slider("Quantidade de slides/cenas:", 3, 5, 3)
 
     btn_gerar = st.form_submit_button("🚀 Gerar Conteúdo Completo")
 
 
-# --- FUNÇÕES TRATADAS ---
+# --- FUNÇÕES AUXILIARES ---
 
 
 def sanitizar_prompt(texto):
-    """Limpa quebras de linha e caracteres especiais para evitar erros em URLs."""
     if not texto:
         return "sports workout"
-    texto_limpo = str(texto).replace("\n", " ").replace("\r", " ").replace('"', "").replace("'", "")
+    texto_limpo = (
+        str(texto)
+        .replace("\n", " ")
+        .replace("\r", " ")
+        .replace('"', "")
+        .replace("'", "")
+    )
     texto_limpo = re.sub(r"\s+", " ", texto_limpo).strip()
     return texto_limpo[:150]
 
@@ -97,7 +102,6 @@ def gerar_url_imagem(prompt, aspecto="1080x1080"):
 
 
 def baixar_bytes_midia(url):
-    """Baixa arquivos com timeout e tratamento de erro."""
     try:
         resp = requests.get(
             url,
@@ -125,16 +129,21 @@ def buscar_video_pexels(query, api_key):
             data = resp.json()
             if data.get("videos"):
                 video_files = data["videos"][0].get("video_files", [])
+                # Seleciona arquivos com menor resolução para economizar RAM
                 for v in video_files:
-                    if v.get("file_type") == "video/mp4":
+                    if v.get("file_type") == "video/mp4" and (
+                        v.get("height", 0) <= 1280
+                    ):
                         return v.get("link")
+                if video_files:
+                    return video_files[0].get("link")
     except Exception:
         pass
     return None
 
 
-def renderizar_video_completo(cenas, pexels_key):
-    """Processa o vídeo compilado via MoviePy se as dependências existirem."""
+def renderizar_video_otimizado(cenas, pexels_key):
+    """Processa o vídeo compilado em baixa resolução para não estourar a RAM do servidor."""
     if not MOVIEPY_DISPONIVEL:
         return None
 
@@ -146,7 +155,7 @@ def renderizar_video_completo(cenas, pexels_key):
             narracao = cena.get("narracao", "")
             busca = cena.get("busca_pexels", "exercise")
 
-            # Áudio
+            # 1. Gerar Áudio
             tts = gTTS(text=narracao, lang="pt", tld="com.br")
             f_audio = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
             tts.save(f_audio.name)
@@ -154,10 +163,10 @@ def renderizar_video_completo(cenas, pexels_key):
             arquivos_temp.append(f_audio.name)
             audio_clip = AudioFileClip(f_audio.name)
 
-            # Vídeo
+            # 2. Buscar e carregar Vídeo
             url_vid = buscar_video_pexels(busca, pexels_key)
             if not url_vid:
-                url_vid = buscar_video_pexels("fitness", pexels_key)
+                url_vid = buscar_video_pexels("fitness sports", pexels_key)
 
             if url_vid:
                 vid_content = baixar_bytes_midia(url_vid)
@@ -172,11 +181,14 @@ def renderizar_video_completo(cenas, pexels_key):
                     video_clip = VideoFileClip(f_vid.name)
                     duracao_audio = audio_clip.duration
 
+                    # Ajusta a duração do vídeo de acordo com a locução
                     if video_clip.duration < duracao_audio:
                         video_clip = video_clip.loop(duration=duracao_audio)
                     else:
                         video_clip = video_clip.subclip(0, duracao_audio)
 
+                    # Redimensiona para resolução leve de celular (360x640)
+                    video_clip = video_clip.resize(height=640)
                     video_clip = video_clip.set_audio(audio_clip)
                     clips.append(video_clip)
 
@@ -188,17 +200,25 @@ def renderizar_video_completo(cenas, pexels_key):
             f_output.close()
             arquivos_temp.append(f_output.name)
 
+            # Configuração de renderização de baixo consumo de memória
             video_final.write_videofile(
                 f_output.name,
                 codec="libx264",
                 audio_codec="aac",
-                fps=24,
+                fps=15,
                 preset="ultrafast",
+                threads=1,
+                bitrate="800k",
                 logger=None,
             )
 
             with open(f_output.name, "rb") as f:
                 video_bytes = f.read()
+
+            # Fecha e limpa da memória
+            for c in clips:
+                c.close()
+            video_final.close()
 
             return video_bytes
 
@@ -340,17 +360,17 @@ if btn_gerar:
                 # --- EXIBIÇÃO: VÍDEO ---
                 else:
                     cenas = dados.get("cenas", [])
-                    c1, c2 = st.columns(2)
+                    c1, c2 = st.columns([1, 1])
 
                     with c1:
-                        st.subheader("🎬 Vídeo Editado")
+                        st.subheader("🎬 Vídeo Sincronizado")
                         video_bytes = None
 
                         if pexels_key:
                             with st.spinner(
-                                "🎥 Compilando vídeo e áudio..."
+                                "🎥 Processando cortes e áudio em modo leve..."
                             ):
-                                video_bytes = renderizar_video_completo(
+                                video_bytes = renderizar_video_otimizado(
                                     cenas, pexels_key
                                 )
 
@@ -363,15 +383,12 @@ if btn_gerar:
                                 "video/mp4",
                             )
                         else:
-                            st.info(
-                                "ℹ️ Exibindo pré-visualização individual das cenas:"
+                            st.warning(
+                                "⚠️ O servidor atingiu o limite de memória para exportar o MP4 único."
                             )
-                            for cena in cenas:
-                                url_v = buscar_video_pexels(
-                                    cena.get("busca_pexels"), pexels_key
-                                )
-                                if url_v:
-                                    st.video(url_v)
+                            st.info(
+                                "Abaixo você pode ver o vídeo e ouvir a narração por cena:"
+                            )
 
                     with c2:
                         st.subheader("🗣️ Roteiro e Narração por Cena")
@@ -380,7 +397,6 @@ if btn_gerar:
                                 f"**Cena {cena.get('numero')}:** {cena.get('narracao')}"
                             )
 
-                            # Gerar áudio individual para ouvir
                             tts = gTTS(
                                 text=cena.get("narracao"),
                                 lang="pt",
@@ -390,6 +406,14 @@ if btn_gerar:
                             tts.write_to_fp(fp)
                             fp.seek(0)
                             st.audio(fp, format="audio/mp3")
+
+                            if pexels_key:
+                                url_v = buscar_video_pexels(
+                                    cena.get("busca_pexels"), pexels_key
+                                )
+                                if url_v:
+                                    st.video(url_v)
+
                             st.caption(
                                 f"Busca Pexels: `{cena.get('busca_pexels')}`"
                             )
